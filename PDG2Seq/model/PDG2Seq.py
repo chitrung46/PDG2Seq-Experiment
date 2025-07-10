@@ -133,7 +133,7 @@ class PDG2Seq(nn.Module):
 
         en_node_embeddings=[node_embedding_en1, node_embedding_en2, self.node_embeddings1]
 
-        source = source[..., self.input_dim]
+        source = source[..., :self.input_dim]
 
         init_state = self.encoder.init_hidden(source.shape[0]).to(source.device)  # [2,64,307,64] 前面是2是因为有两层GRU
         state, _ = self.encoder(source, init_state, en_node_embeddings)  # B, T, N, hidden
