@@ -1,6 +1,7 @@
 import os
 import numpy as np
 import pandas as pd
+import h5py 
 
 def load_st_dataset(dataset):
     #output B, N, D
@@ -22,6 +23,69 @@ def load_st_dataset(dataset):
     elif dataset == 'PEMSD7(M)':
         data_path = os.path.join('./data/PEMS07(M)/V_228.csv')
         data = np.array(pd.read_csv(data_path,header=None))  #onley the first dimension, traffic flow data
+    elif dataset == 'NYC-Taxi':
+        data_path = os.path.join('./data/NYC-Taxi/NYC-Taxi.h5')
+        df = h5py.File(data_path, 'r')
+        rawdata = []
+        for feature in ["pick", "drop"]:
+            key = "taxi_" + feature
+            data = np.array(df[key])
+            rawdata.append(data)
+        data = np.stack(rawdata, -1)
+    elif dataset == 'CHI-Taxi':
+        data_path = os.path.join('./data/CHI-Taxi/CHI-Taxi.h5')
+        df = h5py.File(data_path, 'r')
+        rawdata = []
+        for feature in ["pick", "drop"]:
+            key = "taxi_" + feature
+            data = np.array(df[key])
+            rawdata.append(data)
+        data = np.stack(rawdata, -1)
+    elif dataset == 'DC-Taxi':
+        data_path = os.path.join('./data/DC-Taxi/DC-Taxi.h5')
+        df = h5py.File(data_path, 'r')
+        rawdata = []
+        for feature in ["pick", "drop"]:
+            key = "taxi_" + feature
+            data = np.array(df[key])
+            rawdata.append(data)
+        data = np.stack(rawdata, -1)
+    elif dataset == 'BOS-Bike':
+        data_path = os.path.join('./data/BOS-Bike/BOS-Bike.h5')
+        df = h5py.File(data_path, 'r')
+        rawdata = []
+        for feature in ["pick", "drop"]:
+            key = "bike_" + feature
+            data = np.array(df[key])
+            rawdata.append(data)
+        data = np.stack(rawdata, -1)
+    elif dataset == 'BAY-Bike':
+        data_path = os.path.join('./data/BAY-Bike/BAY-Bike.h5')
+        df = h5py.File(data_path, 'r')
+        rawdata = []
+        for feature in ["pick", "drop"]:
+            key = "bike_" + feature
+            data = np.array(df[key])
+            rawdata.append(data)
+        data = np.stack(rawdata, -1)
+    elif dataset == 'DC-Bike':
+        data_path = os.path.join('./data/DC-Bike/DC-Bike.h5')
+        df = h5py.File(data_path, 'r')
+        rawdata = []
+        for feature in ["pick", "drop"]:
+            key = "bike_" + feature
+            data = np.array(df[key])
+            rawdata.append(data)
+        data = np.stack(rawdata, -1)
+    elif dataset == 'NYC-Bike':
+        data_path = os.path.join('./data/NYC-Bike/NYC-Bike.h5')
+        df = h5py.File(data_path, 'r')
+        rawdata = []
+        for feature in ["pick", "drop"]:
+            key = "bike_" + feature
+            data = np.array(df[key])
+            rawdata.append(data)
+        data = np.stack(rawdata, -1)
     else:
         raise ValueError
     if len(data.shape) == 2:
