@@ -150,7 +150,7 @@ class PDG2Seq(nn.Module):
             if self.training:     #这里的课程学习用了给予一定概率用真实值代替预测值来学习的教师-学生学习法（名字忘了，大概跟着有关）
                 c = np.random.uniform(0, 1)
                 if c < self._compute_sampling_threshold(batches_seen):  #如果满足条件，则用真实值代替预测值训练
-                    go = traget[:, t, :, self.input_dim]
+                    go = traget[:, t, :, :self.input_dim]
         output = torch.stack(out, dim=1)
 
 
