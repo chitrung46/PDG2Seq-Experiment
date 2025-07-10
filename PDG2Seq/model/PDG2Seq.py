@@ -17,6 +17,7 @@ class PDG2Seq_Encoder(nn.Module):
     def forward(self, x, init_state, node_embeddings):
         #shape of x: (B, T, N, D)
         #shape of init_state: (num_layers, B, N, hidden_dim)
+        print(x.shape[2],self.node_num,x.shape[3],self.input_dim)
         assert x.shape[2] == self.node_num and x.shape[3] == self.input_dim
         seq_length = x.shape[1]     #x=[batch,steps,nodes,input_dim]
         current_inputs = x
