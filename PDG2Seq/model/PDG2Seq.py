@@ -58,7 +58,6 @@ class PDG2Seq_Dncoder(nn.Module):
     def forward(self, xt, init_state, node_embeddings):
         # xt: (B, N, D)
         # init_state: (num_layers, B, N, hidden_dim)
-        print(xt.shape[1],self.node_num,xt.shape[2],self.input_dim)
         assert xt.shape[1] == self.node_num and xt.shape[2] == self.input_dim
         current_inputs = xt
         output_hidden = []
