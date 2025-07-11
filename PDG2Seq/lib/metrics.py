@@ -7,6 +7,7 @@ Why add mask to MAPE and MARE?
 '''
 import numpy as np
 import torch
+from scipy.stats import pearsonr
 
 def MAE_torch(pred, true, mask_value=None):
     if mask_value != None:
@@ -37,8 +38,18 @@ def RRSE_torch(pred, true, mask_value=None):
     return torch.sqrt(torch.sum((pred - true) ** 2)) / torch.sqrt(torch.sum((pred - true.mean()) ** 2))
 
 def PCC_torch(pred, true, mask_value=None):
-    pred, true = pred.reshape(-1), true.reshape(-1)
-    return np.corrcoef(pred, true)[0][1]
+    y_true_flat = true.detach().cpu().numpy().flatten()
+    y_pred_flat = pred.detach().cpu().numpy().flatten()
+    
+    mask = ~(np.isnan(y_true_flat) | np.isnan(y_pred_flat))
+    y_true_clean = y_true_flat[mask]
+    y_pred_clean = y_pred_flat[mask]
+    
+    if len(y_true_clean) == 0:
+        return 0.0
+    
+    correlation, _ = pearsonr(y_true_clean, y_pred_clean)
+    return correlation if not np.isnan(correlation) else 0.0
 
 def CORR_torch(pred, true, mask_value=None):
     #input B, T, N, D or B, N, D or B, N
