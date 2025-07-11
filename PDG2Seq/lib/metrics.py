@@ -36,6 +36,10 @@ def RRSE_torch(pred, true, mask_value=None):
         true = torch.masked_select(true, mask)
     return torch.sqrt(torch.sum((pred - true) ** 2)) / torch.sqrt(torch.sum((pred - true.mean()) ** 2))
 
+def PCC_torch(pred, true, mask_value=None):
+    pred, true = pred.reshape(-1), true.reshape(-1)
+    return np.corrcoef(pred, true)[0][1]
+
 def CORR_torch(pred, true, mask_value=None):
     #input B, T, N, D or B, N, D or B, N
     if len(pred.shape) == 2:
@@ -203,12 +207,12 @@ def All_Metrics(pred, true, mask1, mask2):
         rmse = RMSE_torch(pred, true, mask1)
         mape = MAPE_torch(pred, true, mask2)
         rrse = RRSE_torch(pred, true, mask1)
-        corr = CORR_torch(pred, true, mask1)
+        pcc = PCC_torch(pred, true, mask1)
         #pnbi = PNBI_torch(pred, true, mask1)
         #opnbi = oPNBI_torch(pred, true, mask2)
     else:
         raise TypeError
-    return mae, rmse, mape, rrse, corr
+    return mae, rmse, mape, rrse, pcc
 
 def SIGIR_Metrics(pred, true, mask1, mask2):
     rrse = RRSE_torch(pred, true, mask1)

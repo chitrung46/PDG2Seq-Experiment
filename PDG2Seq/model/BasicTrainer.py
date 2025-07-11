@@ -249,13 +249,13 @@ class Trainer(object):
         # np.save('./{}_true.npy'.format(args.dataset), y_true.cpu().numpy())
         # np.save('./{}_pred.npy'.format(args.dataset), y_pred.cpu().numpy())
         for t in range(y_true.shape[1]):
-            mae, rmse, mape, _, corr = All_Metrics(y_pred[:, t, ...], y_true[:, t, ...],
+            mae, rmse, mape, _, pcc = All_Metrics(y_pred[:, t, ...], y_true[:, t, ...],
                                                 args.mae_thresh, args.mape_thresh)
-            logger.info("Horizon {:02d}, RMSE: {:.4f}, MAE: {:.4f}, CORR: {:.4f}%".format(
-                t + 1, rmse, mae, mape*100))
-        mae, rmse, mape, _, corr = All_Metrics(y_pred, y_true, args.mae_thresh, args.mape_thresh)
-        logger.info("test1 Average Horizon, RMSE: {:.4f}, MAE: {:.4f}, MAPE: {:.4f}%".format(
-                    rmse, mae, mape*100))
+            logger.info("Horizon {:02d}, RMSE: {:.4f}, MAE: {:.4f}, PCC: {:.4f}%".format(
+                t + 1, rmse, mae, pcc*100))
+        mae, rmse, mape, _, pcc = All_Metrics(y_pred, y_true, args.mae_thresh, args.mape_thresh)
+        logger.info("test1 Average Horizon, RMSE: {:.4f}, MAE: {:.4f}, PCC: {:.4f}%".format(
+                    rmse, mae, pcc*100))
         # for t in range(y_true.shape[1]):
         #     mae, rmse, mape, _, corr = All_Metrics(y_pred[:, t, ...], y_true[:, t, ...],
         #                                         args.mae_thresh, args.mape_thresh)
