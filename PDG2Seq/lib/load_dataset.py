@@ -91,7 +91,7 @@ def load_st_dataset(dataset):
         df = h5py.File(data_path, 'r')
         rawdata = []
         for feature in ["pick", "drop"]:
-            key = "bike_" + feature
+            key = "taxi_" + feature
             data = np.array(df[key])
             rawdata.append(data)
         data = np.stack(rawdata, -1)
