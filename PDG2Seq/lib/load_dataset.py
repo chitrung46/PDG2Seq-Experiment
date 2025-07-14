@@ -95,6 +95,15 @@ def load_st_dataset(dataset):
             data = np.array(df[key])
             rawdata.append(data)
         data = np.stack(rawdata, -1)
+    elif dataset == 'DC-Taxi1':
+        data_path = os.path.join('./data/DC-Taxi1/DC-Taxi1.h5')
+        df = h5py.File(data_path, 'r')
+        rawdata = []
+        for feature in ["pick", "drop"]:
+            key = "taxi_" + feature
+            data = np.array(df[key])
+            rawdata.append(data)
+        data = np.stack(rawdata, -1)
     else:
         raise ValueError
     if len(data.shape) == 2:
