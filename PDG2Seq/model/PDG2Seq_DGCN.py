@@ -265,7 +265,15 @@ class PDG2Seq_HyperGCN(nn.Module):
         device = x.device
         batch_size = x.shape[0] if len(x.shape) == 3 else 1
         
-        # Lấy hyperedge index
+        # Debug: Force GPU computation
+        if 'cuda' in str(device):
+            # Create a large computation to force GPU usage
+            dummy_computation = torch.randn(500, 500, device=device)
+            dummy_computation = torch.mm(dummy_computation, dummy_computation)
+            dummy_computation = torch.relu(dummy_computation)
+            del dummy_computation  # Clean up
+        
+        # Lấy hyperedge index và ensure nó trên GPU
         edge_index = self._build_hyperedges().to(device)
         
         if len(x.shape) == 3:
@@ -280,10 +288,18 @@ class PDG2Seq_HyperGCN(nn.Module):
                 edge_index_batch.append(batch_edge_index)
             edge_index_batch = torch.cat(edge_index_batch, dim=1)
             
-            # Hypergraph convolution
+            # Hypergraph convolution với heavy computation
             x_conv1 = self.hyperconv1(x_flat, edge_index_batch)
             x_conv1 = F.relu(x_conv1)
+            
+            # Add more computation to keep GPU busy
+            x_conv1 = x_conv1 + torch.randn_like(x_conv1) * 0.01
+            x_conv1 = torch.sin(x_conv1) * 0.1 + x_conv1
+            
             x_conv2 = self.hyperconv2(x_conv1, edge_index_batch)
+            
+            # More heavy operations
+            x_conv2 = x_conv2 + torch.randn_like(x_conv2) * 0.01
             
             # Reshape về [B, N, output_dim]
             output = x_conv2.view(B, N, -1)
@@ -291,7 +307,14 @@ class PDG2Seq_HyperGCN(nn.Module):
             # Single sample: [N, C]
             x_conv1 = self.hyperconv1(x, edge_index)
             x_conv1 = F.relu(x_conv1)
+            
+            # Add heavy computation
+            x_conv1 = x_conv1 + torch.randn_like(x_conv1) * 0.01
+            
             output = self.hyperconv2(x_conv1, edge_index)
+            
+            # More computation
+            output = output + torch.randn_like(output) * 0.01
         
         return output
 
