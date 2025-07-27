@@ -134,7 +134,24 @@ distance_matrix = load_distance_matrix(args.dataset)
 
 #init model
 model = Network(args)
+
+# Explicitly move model to GPU before any computation
+print(f"Moving model to device: {args.device}")
 model = model.to(args.device)
+
+# Verify model is on correct device
+print(f"Model device check: {next(model.parameters()).device}")
+
+# Force model to use GPU by warming up
+if torch.cuda.is_available() and 'cuda' in args.device:
+    print("Warming up GPU...")
+    with torch.no_grad():
+        dummy_input = torch.randn(1, 12, args.num_nodes, args.input_dim).to(args.device)
+        dummy_target = torch.randn(1, 1, args.num_nodes, args.input_dim).to(args.device)
+        _ = model(dummy_input, dummy_target)
+        torch.cuda.synchronize()
+    print("GPU warmup completed")
+
 for p in model.parameters():
     if p.dim() > 1:
         nn.init.xavier_uniform_(p)

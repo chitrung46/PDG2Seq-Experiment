@@ -77,8 +77,16 @@ def data_loader(X, Y, batch_size, shuffle=True, drop_last=True):
     # Không tự động đưa lên GPU, để BasicTrainer quyết định device
     X, Y = torch.FloatTensor(X), torch.FloatTensor(Y)
     data = torch.utils.data.TensorDataset(X, Y)
-    dataloader = torch.utils.data.DataLoader(data, batch_size=batch_size,
-                                             shuffle=shuffle, drop_last=drop_last)
+    
+    # Sử dụng pin_memory để tăng tốc chuyển dữ liệu lên GPU
+    pin_memory = torch.cuda.is_available()
+    
+    dataloader = torch.utils.data.DataLoader(data, 
+                                            batch_size=batch_size,
+                                            shuffle=shuffle, 
+                                            drop_last=drop_last,
+                                            pin_memory=pin_memory,
+                                            num_workers=0)  # Kaggle thường không hỗ trợ multiprocessing
     return dataloader
 
 

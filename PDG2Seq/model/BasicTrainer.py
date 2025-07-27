@@ -86,10 +86,21 @@ class Trainer(object):
         self.model.train()
         total_loss = 0
         epoch_time = time.time()
+        
+        # Debug GPU usage
+        if torch.cuda.is_available() and 'cuda' in str(self.args.device):
+            print(f"Epoch {epoch}: Using GPU {self.args.device}")
+            print(f"Model on device: {next(self.model.parameters()).device}")
+        
         for batch_idx, (data, target) in enumerate(self.train_loader):
             self.batches_seen += 1
             data = data.to(self.args.device)
             target = target.to(self.args.device)
+            
+            # Debug: kiểm tra device của tensors
+            if batch_idx == 0:
+                print(f"Data device: {data.device}, Target device: {target.device}")
+            
             label = target[..., :self.args.output_dim].clone()  # (..., 1)
             target[..., :self.args.output_dim] = self.scaler.transform(target[..., :self.args.output_dim])
             self.optimizer.zero_grad()

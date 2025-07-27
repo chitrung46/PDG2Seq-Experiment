@@ -250,7 +250,7 @@ class PDG2Seq_HyperGCN(nn.Module):
         except Exception as e:
             print(f"Error building hyperedges: {e}")
             # Fallback: tạo edges đơn giản
-            num_nodes = 128  # default
+            num_nodes = self.args.num_nodes if hasattr(self, 'args') else 250  # sử dụng num_nodes từ config
             self._cached_hyperedges = torch.tensor([[i for i in range(num_nodes)],
                                                    [i for i in range(num_nodes)]], 
                                                   dtype=torch.long)
