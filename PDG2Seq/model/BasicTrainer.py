@@ -4,8 +4,11 @@ import os
 import time
 import copy
 import numpy as np
+import pynvml
+from lib.logger import get_logger
+from lib.metrics import All_Metrics
+
 try:
-    import pynvml
     pynvml.nvmlInit()
     handle = pynvml.nvmlDeviceGetHandleByIndex(0)
     NVML_AVAILABLE = True
@@ -13,8 +16,6 @@ except:
     handle = None
     NVML_AVAILABLE = False
     print("NVML not available, GPU monitoring disabled")
-from lib.logger import get_logger
-from lib.metrics import All_Metrics
 class Trainer(object):
     def __init__(self, model, loss, optimizer, train_loader, val_loader, test_loader,
                  scaler, args, lr_scheduler=None):
@@ -122,7 +123,7 @@ class Trainer(object):
                 self.logger.info('Train Epoch {}: {}/{} Loss: {:.6f}'.format(
                     epoch, batch_idx+1, self.train_per_epoch, loss.item()))
         train_epoch_loss = total_loss/self.train_per_epoch
-        if NVML_AVAILABLE:
+        if NVML_AVAILABLE and handle is not None:
             meminfo = pynvml.nvmlDeviceGetMemoryInfo(handle)
             self.logger.info('********Train Epoch {}: averaged Loss: {:.6f}, GPU cost: {:.2f} GB, train time: {:.2f} s'.format(epoch, train_epoch_loss, (meminfo.used - self.meminfo.used) / 1024 ** 3,time.time() - epoch_time))
         else:
@@ -137,7 +138,7 @@ class Trainer(object):
         return train_epoch_loss
 
     def train(self):
-        if NVML_AVAILABLE:
+        if NVML_AVAILABLE and handle is not None:
             self.meminfo = pynvml.nvmlDeviceGetMemoryInfo(handle)
         else:
             self.meminfo = None
