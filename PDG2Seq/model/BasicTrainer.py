@@ -4,11 +4,17 @@ import os
 import time
 import copy
 import numpy as np
-import pynvml
+try:
+    import pynvml
+    pynvml.nvmlInit()
+    handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+    NVML_AVAILABLE = True
+except:
+    handle = None
+    NVML_AVAILABLE = False
+    print("NVML not available, GPU monitoring disabled")
 from lib.logger import get_logger
 from lib.metrics import All_Metrics
-pynvml.nvmlInit()
-handle = pynvml.nvmlDeviceGetHandleByIndex(0)
 class Trainer(object):
     def __init__(self, model, loss, optimizer, train_loader, val_loader, test_loader,
                  scaler, args, lr_scheduler=None):
@@ -116,12 +122,14 @@ class Trainer(object):
                 self.logger.info('Train Epoch {}: {}/{} Loss: {:.6f}'.format(
                     epoch, batch_idx+1, self.train_per_epoch, loss.item()))
         train_epoch_loss = total_loss/self.train_per_epoch
-        meminfo = pynvml.nvmlDeviceGetMemoryInfo(handle)
+        if NVML_AVAILABLE:
+            meminfo = pynvml.nvmlDeviceGetMemoryInfo(handle)
+            self.logger.info('********Train Epoch {}: averaged Loss: {:.6f}, GPU cost: {:.2f} GB, train time: {:.2f} s'.format(epoch, train_epoch_loss, (meminfo.used - self.meminfo.used) / 1024 ** 3,time.time() - epoch_time))
+        else:
+            self.logger.info('********Train Epoch {}: averaged Loss: {:.6f}, train time: {:.2f} s'.format(epoch, train_epoch_loss, time.time() - epoch_time))
         # test_loss.append(test_epoch_loss)
         # train_time.append(time.time()-start_time)
         # train_M.append((meminfo.used - meminfo1.used) / 1024 ** 3)
-
-        self.logger.info('********Train Epoch {}: averaged Loss: {:.6f}, GPU cost: {:.2f} GB, train time: {:.2f} s'.format(epoch, train_epoch_loss, (meminfo.used - self.meminfo.used) / 1024 ** 3,time.time() - epoch_time))
 
         #learning rate decay
         if self.args.lr_decay:
@@ -129,7 +137,10 @@ class Trainer(object):
         return train_epoch_loss
 
     def train(self):
-        self.meminfo = pynvml.nvmlDeviceGetMemoryInfo(handle)
+        if NVML_AVAILABLE:
+            self.meminfo = pynvml.nvmlDeviceGetMemoryInfo(handle)
+        else:
+            self.meminfo = None
         best_model = None
         best_test_model =None
         # start_time = time.time()
