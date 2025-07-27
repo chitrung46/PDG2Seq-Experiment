@@ -74,9 +74,8 @@ def split_data_by_ratio(data, val_ratio, test_ratio):
     return train_data, val_data, test_data
 
 def data_loader(X, Y, batch_size, shuffle=True, drop_last=True):
-    cuda = True if torch.cuda.is_available() else False
-    TensorFloat = torch.cuda.FloatTensor if cuda else torch.FloatTensor
-    X, Y = TensorFloat(X), TensorFloat(Y)
+    # Không tự động đưa lên GPU, để BasicTrainer quyết định device
+    X, Y = torch.FloatTensor(X), torch.FloatTensor(Y)
     data = torch.utils.data.TensorDataset(X, Y)
     dataloader = torch.utils.data.DataLoader(data, batch_size=batch_size,
                                              shuffle=shuffle, drop_last=drop_last)

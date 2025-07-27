@@ -54,14 +54,15 @@ class Trainer(object):
         epoch_time = time.time()
         with torch.no_grad():
             for batch_idx, (data, target) in enumerate(val_dataloader):
-                data = data
+                data = data.to(self.args.device)
+                target = target.to(self.args.device)
                 label = target[..., :self.args.output_dim].clone()
                 target[...,:self.args.output_dim] = self.scaler.transform(target[...,:self.args.output_dim])
                 output = self.model(data, target)
                 if self.args.real_value:
                     output = self.scaler.inverse_transform(output)
                     # label = self.scaler.inverse_transform(label)
-                loss = self.loss(output.cuda(), label)
+                loss = self.loss(output, label)
                 #a whole batch of Metr_LA is filtered
                 if not torch.isnan(loss):
                     total_val_loss += loss.item()
@@ -75,14 +76,15 @@ class Trainer(object):
         epoch_time = time.time()
         with torch.no_grad():
             for batch_idx, (data, target) in enumerate(test_dataloader):
-                data = data
+                data = data.to(self.args.device)
+                target = target.to(self.args.device)
                 label = target[..., :self.args.output_dim].clone()
                 target[...,:self.args.output_dim] = self.scaler.transform(target[...,:self.args.output_dim])
                 output = self.model(data, target)
                 if self.args.real_value:
                     output = self.scaler.inverse_transform(output)
                     # label = self.scaler.inverse_transform(label)
-                loss = self.loss(output.cuda(), label)
+                loss = self.loss(output, label)
                 #a whole batch of Metr_LA is filtered
                 if not torch.isnan(loss):
                     total_test_loss += loss.item()
@@ -96,7 +98,8 @@ class Trainer(object):
         epoch_time = time.time()
         for batch_idx, (data, target) in enumerate(self.train_loader):
             self.batches_seen += 1
-            data = data
+            data = data.to(self.args.device)
+            target = target.to(self.args.device)
             label = target[..., :self.args.output_dim].clone()  # (..., 1)
             target[..., :self.args.output_dim] = self.scaler.transform(target[..., :self.args.output_dim])
             self.optimizer.zero_grad()
@@ -109,7 +112,7 @@ class Trainer(object):
                 output = self.scaler.inverse_transform(output)
                 # label = self.scaler.inverse_transform(label)
 
-            loss = self.loss(output.cuda(), label)
+            loss = self.loss(output, label)
             loss.backward()
 
             # add max grad clipping
@@ -245,7 +248,8 @@ class Trainer(object):
         y_true = []
         with torch.no_grad():
             for batch_idx, (data, target) in enumerate(data_loader):
-                data = data
+                data = data.to(args.device)
+                target = target.to(args.device)
                 label = target[..., :args.output_dim]
                 output = model(data, target)
                 y_true.append(label)
