@@ -10,9 +10,15 @@ class PDG2Seq_Encoder(nn.Module):
         self.input_dim = dim_in
         self.num_layers = num_layers
         self.PDG2Seq_cells = nn.ModuleList()
-        self.PDG2Seq_cells.append(PDG2SeqCell(node_num, dim_in, dim_out, cheb_k, embed_dim, time_dim))
+        self.PDG2Seq_cells.append(PDG2SeqCell(node_num, dim_in, dim_out, cheb_k, embed_dim, time_dim,
+                                             use_hypergraph=getattr(self, 'use_hypergraph', True),
+                                             use_interactive=getattr(self, 'use_interactive', True),
+                                             num_hyper_edges=getattr(self, 'num_hyper_edges', 32)))
         for _ in range(1, num_layers):
-            self.PDG2Seq_cells.append(PDG2SeqCell(node_num, dim_out, dim_out, cheb_k, embed_dim, time_dim))
+            self.PDG2Seq_cells.append(PDG2SeqCell(node_num, dim_out, dim_out, cheb_k, embed_dim, time_dim,
+                                                 use_hypergraph=getattr(self, 'use_hypergraph', True),
+                                                 use_interactive=getattr(self, 'use_interactive', True),
+                                                 num_hyper_edges=getattr(self, 'num_hyper_edges', 32)))
 
     def forward(self, x, init_state, node_embeddings):
         #shape of x: (B, T, N, D)
@@ -51,9 +57,15 @@ class PDG2Seq_Dncoder(nn.Module):
         self.input_dim = dim_in
         self.num_layers = num_layers
         self.PDG2Seq_cells = nn.ModuleList()
-        self.PDG2Seq_cells.append(PDG2SeqCell(node_num, dim_in, dim_out, cheb_k, embed_dim, time_dim))
+        self.PDG2Seq_cells.append(PDG2SeqCell(node_num, dim_in, dim_out, cheb_k, embed_dim, time_dim,
+                                             use_hypergraph=getattr(self, 'use_hypergraph', True),
+                                             use_interactive=getattr(self, 'use_interactive', True),
+                                             num_hyper_edges=getattr(self, 'num_hyper_edges', 32)))
         for _ in range(1, num_layers):
-            self.PDG2Seq_cells.append(PDG2SeqCell(node_num, dim_in, dim_out, cheb_k, embed_dim, time_dim))
+            self.PDG2Seq_cells.append(PDG2SeqCell(node_num, dim_in, dim_out, cheb_k, embed_dim, time_dim,
+                                                 use_hypergraph=getattr(self, 'use_hypergraph', True),
+                                                 use_interactive=getattr(self, 'use_interactive', True),
+                                                 num_hyper_edges=getattr(self, 'num_hyper_edges', 32)))
 
     def forward(self, xt, init_state, node_embeddings):
         # xt: (B, N, D)
@@ -86,10 +98,21 @@ class PDG2Seq(nn.Module):
         self.T_i_D_emb2 = nn.Parameter(torch.empty(288, args.time_dim))
         self.D_i_W_emb2 = nn.Parameter(torch.empty(7, args.time_dim))
 
-        self.encoder = PDG2Seq_Encoder(args.num_nodes, args.input_dim, args.rnn_units, args.cheb_k,
-                                       args.embed_dim, args.time_dim, args.num_layers)
-        self.decoder = PDG2Seq_Dncoder(args.num_nodes, args.input_dim, args.rnn_units, args.cheb_k,
-                                       args.embed_dim, args.time_dim, args.num_layers)
+        self.encoder = PDG2Seq_Encoder(
+            args.num_nodes, args.input_dim, args.rnn_units, args.cheb_k,
+            args.embed_dim, args.time_dim, args.num_layers
+        )
+        self.encoder.use_hypergraph = getattr(args, 'use_hypergraph', True)
+        self.encoder.use_interactive = getattr(args, 'use_interactive', True)
+        self.encoder.num_hyper_edges = getattr(args, 'num_hyper_edges', 32)
+
+        self.decoder = PDG2Seq_Dncoder(
+            args.num_nodes, args.input_dim, args.rnn_units, args.cheb_k,
+            args.embed_dim, args.time_dim, args.num_layers
+        )
+        self.decoder.use_hypergraph = getattr(args, 'use_hypergraph', True)
+        self.decoder.use_interactive = getattr(args, 'use_interactive', True)
+        self.decoder.num_hyper_edges = getattr(args, 'num_hyper_edges', 32)
         #predictor
         self.proj = nn.Sequential(nn.Linear(self.hidden_dim, self.output_dim, bias=True))
         self.end_conv = nn.Conv2d(1, args.horizon * self.output_dim, kernel_size=(1, self.hidden_dim), bias=True)

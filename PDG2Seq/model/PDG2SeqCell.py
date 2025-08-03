@@ -1,6 +1,8 @@
 import torch
 import torch.nn as nn
 from model.PDG2Seq_DGCN import PDG2Seq_GCN
+from model.hypergraph import HypergraphLearning
+from model.interactive import InteractiveGCN
 from collections import OrderedDict
 import torch.nn.functional as F
 class FC(nn.Module):
@@ -24,7 +26,7 @@ class FC(nn.Module):
         return ho
 
 class PDG2SeqCell(nn.Module):  #这个模块只进行GRU内部的更新，所以需要修改的是AGCN里面的东西
-    def __init__(self, node_num, dim_in, dim_out, cheb_k, embed_dim, time_dim):
+    def __init__(self, node_num, dim_in, dim_out, cheb_k, embed_dim, time_dim, use_hypergraph=True, use_interactive=True, num_hyper_edges=32):
         super(PDG2SeqCell, self).__init__()
         self.node_num = node_num
         self.hidden_dim = dim_out
@@ -32,35 +34,46 @@ class PDG2SeqCell(nn.Module):  #这个模块只进行GRU内部的更新，所以
         self.update = PDG2Seq_GCN(dim_in + self.hidden_dim, dim_out, cheb_k, embed_dim, time_dim)
         self.fc1 = FC(dim_in + self.hidden_dim, time_dim)
         self.fc2 = FC(dim_in + self.hidden_dim, time_dim)
+        self.use_hypergraph = use_hypergraph
+        self.use_interactive = use_interactive
+        if use_hypergraph:
+            self.hypergraph = HypergraphLearning(dim_out, num_hyper_edges)
+        if use_interactive:
+            self.interactive = InteractiveGCN(dim_out)
 
     def forward(self, x, state, node_embeddings):
-        #x: B, num_nodes, input_dim
-        #state: B, num_nodes, hidden_dim
+        # x: B, num_nodes, input_dim
+        # state: B, num_nodes, hidden_dim
         state = state.to(x.device)
         input_and_state = torch.cat((x, state), dim=-1)
         filter1 = self.fc1(input_and_state)
         filter2 = self.fc2(input_and_state)
 
-        nodevec1 = torch.tanh(torch.einsum('bd,bnd->bnd', node_embeddings[0], filter1)) #[B,N,dim_in]
+        nodevec1 = torch.tanh(torch.einsum('bd,bnd->bnd', node_embeddings[0], filter1))  # [B,N,dim_in]
         nodevec2 = torch.tanh(torch.einsum('bd,bnd->bnd', node_embeddings[1], filter2))  # [B,N,dim_in]
-
 
         adj = torch.matmul(nodevec1, nodevec2.transpose(2, 1)) - torch.matmul(
             nodevec2, nodevec1.transpose(2, 1))
 
         adj1 = PDG2SeqCell.preprocessing(F.relu(adj))
         adj2 = PDG2SeqCell.preprocessing(F.relu(-adj.transpose(-2, -1)))
-
-
         adj = [adj1, adj2]
-
 
         z_r = torch.sigmoid(self.gate(input_and_state, adj, node_embeddings[2]))
         z, r = torch.split(z_r, self.hidden_dim, dim=-1)
-        candidate = torch.cat((x, z*state), dim=-1)
+        candidate = torch.cat((x, z * state), dim=-1)
         hc = torch.tanh(self.update(candidate, adj, node_embeddings[2]))
-        h = r*state + (1-r)*hc
-        return h
+        # Kết hợp hypergraph và interactive
+        h = r * state + (1 - r) * hc
+        h_out = h
+        if self.use_hypergraph:
+            h_hyper = self.hypergraph(h)
+            h_out = h_out + h_hyper
+        if self.use_interactive:
+            # Dùng adj1 làm adjacency cho interactive
+            h_inter = self.interactive(h, adj1)
+            h_out = h_out + h_inter
+        return h_out
 
     def init_hidden_state(self, batch_size):
         return torch.zeros(batch_size, self.node_num, self.hidden_dim)
