@@ -74,19 +74,12 @@ def split_data_by_ratio(data, val_ratio, test_ratio):
     return train_data, val_data, test_data
 
 def data_loader(X, Y, batch_size, shuffle=True, drop_last=True):
-    # Không tự động đưa lên GPU, để BasicTrainer quyết định device
-    X, Y = torch.FloatTensor(X), torch.FloatTensor(Y)
+    cuda = True if torch.cuda.is_available() else False
+    TensorFloat = torch.cuda.FloatTensor if cuda else torch.FloatTensor
+    X, Y = TensorFloat(X), TensorFloat(Y)
     data = torch.utils.data.TensorDataset(X, Y)
-    
-    # Sử dụng pin_memory để tăng tốc chuyển dữ liệu lên GPU
-    pin_memory = torch.cuda.is_available()
-    
-    dataloader = torch.utils.data.DataLoader(data, 
-                                            batch_size=batch_size,
-                                            shuffle=shuffle, 
-                                            drop_last=drop_last,
-                                            pin_memory=pin_memory,
-                                            num_workers=0)  # Kaggle thường không hỗ trợ multiprocessing
+    dataloader = torch.utils.data.DataLoader(data, batch_size=batch_size,
+                                             shuffle=shuffle, drop_last=drop_last)
     return dataloader
 
 

@@ -4,8 +4,11 @@ import os
 import time
 import copy
 import numpy as np
+import pynvml
 from lib.logger import get_logger
 from lib.metrics import All_Metrics
+pynvml.nvmlInit()
+handle = pynvml.nvmlDeviceGetHandleByIndex(0)
 class Trainer(object):
     def __init__(self, model, loss, optimizer, train_loader, val_loader, test_loader,
                  scaler, args, lr_scheduler=None):
@@ -44,15 +47,14 @@ class Trainer(object):
         epoch_time = time.time()
         with torch.no_grad():
             for batch_idx, (data, target) in enumerate(val_dataloader):
-                data = data.to(self.args.device)
-                target = target.to(self.args.device)
+                data = data
                 label = target[..., :self.args.output_dim].clone()
                 target[...,:self.args.output_dim] = self.scaler.transform(target[...,:self.args.output_dim])
                 output = self.model(data, target)
                 if self.args.real_value:
                     output = self.scaler.inverse_transform(output)
                     # label = self.scaler.inverse_transform(label)
-                loss = self.loss(output, label)
+                loss = self.loss(output.cuda(), label)
                 #a whole batch of Metr_LA is filtered
                 if not torch.isnan(loss):
                     total_val_loss += loss.item()
@@ -66,15 +68,14 @@ class Trainer(object):
         epoch_time = time.time()
         with torch.no_grad():
             for batch_idx, (data, target) in enumerate(test_dataloader):
-                data = data.to(self.args.device)
-                target = target.to(self.args.device)
+                data = data
                 label = target[..., :self.args.output_dim].clone()
                 target[...,:self.args.output_dim] = self.scaler.transform(target[...,:self.args.output_dim])
                 output = self.model(data, target)
                 if self.args.real_value:
                     output = self.scaler.inverse_transform(output)
                     # label = self.scaler.inverse_transform(label)
-                loss = self.loss(output, label)
+                loss = self.loss(output.cuda(), label)
                 #a whole batch of Metr_LA is filtered
                 if not torch.isnan(loss):
                     total_test_loss += loss.item()
@@ -86,21 +87,9 @@ class Trainer(object):
         self.model.train()
         total_loss = 0
         epoch_time = time.time()
-        
-        # Debug GPU usage
-        if torch.cuda.is_available() and 'cuda' in str(self.args.device):
-            print(f"Epoch {epoch}: Using GPU {self.args.device}")
-            print(f"Model on device: {next(self.model.parameters()).device}")
-        
         for batch_idx, (data, target) in enumerate(self.train_loader):
             self.batches_seen += 1
-            data = data.to(self.args.device)
-            target = target.to(self.args.device)
-            
-            # Debug: kiểm tra device của tensors
-            if batch_idx == 0:
-                print(f"Data device: {data.device}, Target device: {target.device}")
-            
+            data = data
             label = target[..., :self.args.output_dim].clone()  # (..., 1)
             target[..., :self.args.output_dim] = self.scaler.transform(target[..., :self.args.output_dim])
             self.optimizer.zero_grad()
@@ -113,7 +102,7 @@ class Trainer(object):
                 output = self.scaler.inverse_transform(output)
                 # label = self.scaler.inverse_transform(label)
 
-            loss = self.loss(output, label)
+            loss = self.loss(output.cuda(), label)
             loss.backward()
 
             # add max grad clipping
@@ -127,10 +116,12 @@ class Trainer(object):
                 self.logger.info('Train Epoch {}: {}/{} Loss: {:.6f}'.format(
                     epoch, batch_idx+1, self.train_per_epoch, loss.item()))
         train_epoch_loss = total_loss/self.train_per_epoch
-        self.logger.info('********Train Epoch {}: averaged Loss: {:.6f}, train time: {:.2f} s'.format(epoch, train_epoch_loss, time.time() - epoch_time))
+        meminfo = pynvml.nvmlDeviceGetMemoryInfo(handle)
         # test_loss.append(test_epoch_loss)
         # train_time.append(time.time()-start_time)
         # train_M.append((meminfo.used - meminfo1.used) / 1024 ** 3)
+
+        self.logger.info('********Train Epoch {}: averaged Loss: {:.6f}, GPU cost: {:.2f} GB, train time: {:.2f} s'.format(epoch, train_epoch_loss, (meminfo.used - self.meminfo.used) / 1024 ** 3,time.time() - epoch_time))
 
         #learning rate decay
         if self.args.lr_decay:
@@ -138,6 +129,7 @@ class Trainer(object):
         return train_epoch_loss
 
     def train(self):
+        self.meminfo = pynvml.nvmlDeviceGetMemoryInfo(handle)
         best_model = None
         best_test_model =None
         # start_time = time.time()
@@ -241,8 +233,7 @@ class Trainer(object):
         y_true = []
         with torch.no_grad():
             for batch_idx, (data, target) in enumerate(data_loader):
-                data = data.to(args.device)
-                target = target.to(args.device)
+                data = data
                 label = target[..., :args.output_dim]
                 output = model(data, target)
                 y_true.append(label)
