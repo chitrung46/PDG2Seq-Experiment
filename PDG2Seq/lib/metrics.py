@@ -234,4 +234,3 @@ if __name__ == '__main__':
     pred = torch.Tensor([1, 2, 3,4])
     true = torch.Tensor([2, 1, 4,5])
     print(All_Metrics(pred, true, None, None))
-

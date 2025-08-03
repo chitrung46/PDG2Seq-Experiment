@@ -110,7 +110,3 @@ def load_st_dataset(dataset):
         data = np.expand_dims(data, axis=-1)
     print('Load %s Dataset shaped: ' % dataset, data.shape, data.max(), data.min(), data.mean(), np.median(data))
     return data
-
-#
-# data_path = os.path.join('../data/PeMS07/PEMS07.npz')
-# data = np.load(data_path)['data'][:, :, 0]  # onley the first dimension, traffic flow data
