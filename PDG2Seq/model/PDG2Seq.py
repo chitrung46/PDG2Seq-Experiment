@@ -137,6 +137,8 @@ class PDG2Seq(nn.Module):
             source_main = source[..., :self.input_dim]
             source_main = source_main.permute(0, 2, 1, 3).reshape(B * N, T, self.input_dim)
             source_main = self.revin(source_main, 'norm')
+            if torch.isnan(source_main).any() or torch.isinf(source_main).any():
+                print("Có NaN hoặc Inf trong source_main sau RevIN!")
             source_main = source_main.reshape(B, N, T, self.input_dim).permute(0, 2, 1, 3)
             source = torch.cat([source_main, source[..., self.input_dim:]], dim=-1)
 
