@@ -102,7 +102,7 @@ class PDG2Seq(nn.Module):
         self.use_revin = getattr(args, 'use_revin', True)
         if self.use_revin:
             self.revin = RevIN(
-                num_features=self.input_dim,
+                num_features=4,
                 affine=getattr(args, 'revin_affine', True),
                 subtract_last=getattr(args, 'revin_subtract_last', False)
             )
