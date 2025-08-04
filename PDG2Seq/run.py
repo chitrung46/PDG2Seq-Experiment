@@ -49,6 +49,9 @@ args.add_argument('--cuda', default=True, type=bool)
 args.add_argument('--use_revin', default=True, type=bool)
 args.add_argument('--affine', default=True, type=bool)
 args.add_argument('--subtract_last', default=False, type=bool)
+args.add_argument('--use_patch', default=False, type=bool, help='use patch embedding')
+args.add_argument('--patch_len', default=4, type=int, help='length of each patch')
+args.add_argument('--stride', default=2, type=int, help='stride for patch embedding')
 args1 = args.parse_args()
 
 #get configuration
