@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 from model.PDG2SeqCell import PDG2SeqCell
 import numpy as np
+from .revin import RevIN
 class PDG2Seq_Encoder(nn.Module):
     def __init__(self, node_num, dim_in, dim_out, cheb_k, embed_dim, time_dim, num_layers=1):
         super(PDG2Seq_Encoder, self).__init__()
@@ -19,7 +20,7 @@ class PDG2Seq_Encoder(nn.Module):
                                                  use_hypergraph=getattr(self, 'use_hypergraph', True),
                                                  use_interactive=getattr(self, 'use_interactive', True),
                                                  num_hyper_edges=getattr(self, 'num_hyper_edges', 32)))
-
+        
     def forward(self, x, init_state, node_embeddings):
         #shape of x: (B, T, N, D)
         #shape of init_state: (num_layers, B, N, hidden_dim)
@@ -98,6 +99,14 @@ class PDG2Seq(nn.Module):
         self.T_i_D_emb2 = nn.Parameter(torch.empty(288, args.time_dim))
         self.D_i_W_emb2 = nn.Parameter(torch.empty(7, args.time_dim))
 
+        self.use_revin = getattr(args, 'use_revin', True)
+        if self.use_revin:
+            self.revin = RevIN(
+                num_features=self.input_dim,
+                affine=getattr(args, 'revin_affine', True),
+                subtract_last=getattr(args, 'revin_subtract_last', False)
+            )
+
         self.encoder = PDG2Seq_Encoder(
             args.num_nodes, args.input_dim, args.rnn_units, args.cheb_k,
             args.embed_dim, args.time_dim, args.num_layers
@@ -120,6 +129,13 @@ class PDG2Seq(nn.Module):
     def forward(self, source, traget=None, batches_seen=None):
         #source: B, T_1, N, D
         #target: B, T_2, N, D
+
+
+        if self.revin:
+            B, T, N, D = source.shape
+            source_reshape = source.permute(0, 2, 1, 3).reshape(B * N, T, D)
+            source_reshape = self.revin(source_reshape, 'norm')
+            source = source_reshape.reshape(B, N, T, D).permute(0, 2, 1, 3)
 
 
         t_i_d_data1 = source[..., 0,-2]
@@ -174,7 +190,12 @@ class PDG2Seq(nn.Module):
                 if c < self._compute_sampling_threshold(batches_seen):  #如果满足条件，则用真实值代替预测值训练
                     go = traget[:, t, :, :self.input_dim]
         output = torch.stack(out, dim=1)
-
+        
+        if self.revin:
+            B, T, N, D = output.shape
+            output_reshape = output.permute(0, 2, 1, 3).reshape(B * N, T, D)
+            output_reshape = self.revin(output_reshape, 'denorm')
+            output = output_reshape.reshape(B, N, T, D).permute(0, 2, 1, 3)
 
         return output
 
