@@ -102,7 +102,7 @@ class PDG2Seq(nn.Module):
         self.use_revin = getattr(args, 'use_revin', True)
         if self.use_revin:
             self.revin = RevIN(
-                num_features=4,
+                num_features=self.input_dim,
                 affine=getattr(args, 'revin_affine', True),
                 subtract_last=getattr(args, 'revin_subtract_last', False)
             )
@@ -133,9 +133,12 @@ class PDG2Seq(nn.Module):
 
         if self.revin:
             B, T, N, D = source.shape
-            source_reshape = source.permute(0, 2, 1, 3).reshape(B * N, T, D)
-            source_reshape = self.revin(source_reshape, 'norm')
-            source = source_reshape.reshape(B, N, T, D).permute(0, 2, 1, 3)
+            source_main = source[..., :self.input_dim]
+            source_main = source_main.permute(0, 2, 1, 3).reshape(B * N, T, 2)
+            source_main = self.revin(source_main, 'norm')
+            source_main = source_main.reshape(B, N, T, 2).permute(0, 2, 1, 3)
+
+            source = torch.cat([source_main, source[..., self.input_dim:]], dim=-1)
 
 
         t_i_d_data1 = source[..., 0,-2]
@@ -193,10 +196,12 @@ class PDG2Seq(nn.Module):
         
         if self.revin:
             B, T, N, D = output.shape
-            output_reshape = output.permute(0, 2, 1, 3).reshape(B * N, T, D)
-            output_reshape = self.revin(output_reshape, 'denorm')
-            output = output_reshape.reshape(B, N, T, D).permute(0, 2, 1, 3)
+            output_main = output[..., :self.input_dim]
+            output_main = output_main.permute(0, 2, 1, 3).reshape(B * N, T, 2)
+            output_main = self.revin(output_main, 'denorm')
+            output_main = output_main.reshape(B, N, T, 2).permute(0, 2, 1, 3)
 
+            output = torch.cat([output_main, output[..., self.output_dim:]], dim=-1) if output.shape[-1] > 2 else output_main
         return output
 
     def _compute_sampling_threshold(self, batches_seen):
