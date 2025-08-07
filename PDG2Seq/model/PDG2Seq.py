@@ -22,35 +22,27 @@ class PDG2Seq_Encoder(nn.Module):
                                                  use_hypergraph=getattr(self, 'use_hypergraph', True),
                                                  use_interactive=getattr(self, 'use_interactive', True),
                                                  num_hyper_edges=getattr(self, 'num_hyper_edges', 32)))
-
+        
     def forward(self, x, init_state, node_embeddings):
-        #shape of x: (B, T, N, D)
-        #shape of init_state: (num_layers, B, N, hidden_dim)
         assert x.shape[2] == self.node_num and x.shape[3] == self.input_dim
-        seq_length = x.shape[1]     #x=[batch,steps,nodes,input_dim]
+        seq_length = x.shape[1]
         current_inputs = x
         output_hidden = []
         for i in range(self.num_layers):
-            state = init_state[i]   #state=[batch,steps,nodes,input_dim]
+            state = init_state[i]
             inner_states = []
-            for t in range(seq_length):   #如果有两层GRU，则第二层的GGRU的输入是前一层的隐藏状态
-                state = self.PDG2Seq_cells[i](current_inputs[:, t, :, :], state, [node_embeddings[0][:, t, :], node_embeddings[1][:, t, :], node_embeddings[2]])#state=[batch,steps,nodes,input_dim]
-                # state = self.dcrnn_cells[i](current_inputs[:, t, :, :], state,[node_embeddings[0], node_embeddings[1]])
-                inner_states.append(state)   #一个list，里面是每一步的GRU的hidden状态
-            output_hidden.append(state)  #每层最后一个GRU单元的hidden状态
+            for t in range(seq_length):
+                state = self.PDG2Seq_cells[i](current_inputs[:, t, :, :], state, [node_embeddings[0][:, t, :], node_embeddings[1][:, t, :], node_embeddings[2]])
+                inner_states.append(state)
+            output_hidden.append(state)
             current_inputs = torch.stack(inner_states, dim=1)
-            #拼接成完整的上一层GRU的hidden状态，作为下一层GRRU的输入[batch,steps,nodes,hiddensize]
-        #current_inputs: the outputs of last layer: (B, T, N, hidden_dim)
-        #output_hidden: the last state for each layer: (num_layers, B, N, hidden_dim)
-        #last_state: (B, N, hidden_dim)
         return current_inputs, output_hidden
 
     def init_hidden(self, batch_size):
         init_states = []
         for i in range(self.num_layers):
             init_states.append(self.PDG2Seq_cells[i].init_hidden_state(batch_size))
-        return torch.stack(init_states, dim=0)      #(num_layers, B, N, hidden_dim)
-
+        return torch.stack(init_states, dim=0)
 
 class PDG2Seq_Dncoder(nn.Module):
     def __init__(self, node_num, dim_in, dim_out, cheb_k, embed_dim, time_dim, num_layers=1):
@@ -71,8 +63,6 @@ class PDG2Seq_Dncoder(nn.Module):
                                                  num_hyper_edges=getattr(self, 'num_hyper_edges', 32)))
 
     def forward(self, xt, init_state, node_embeddings):
-        # xt: (B, N, D)
-        # init_state: (num_layers, B, N, hidden_dim)
         assert xt.shape[1] == self.node_num and xt.shape[2] == self.input_dim
         current_inputs = xt
         output_hidden = []
@@ -102,7 +92,6 @@ class PDG2Seq(nn.Module):
 
         self.use_revin = getattr(args, 'use_revin', True)
         if self.use_revin == True:
-            print("use revin")
             self.revin = RevIN(
                 num_features=self.input_dim,
                 affine=getattr(args, 'revin_affine', True),
@@ -122,17 +111,16 @@ class PDG2Seq(nn.Module):
             self.encoder_input_dim = self.input_dim
 
         self.encoder = PDG2Seq_Encoder(
-            args.num_nodes, args.input_dim, args.rnn_units, args.cheb_k,
-            args.embed_dim, args.time_dim, args.num_layers
+            self.num_node, self.encoder_input_dim, self.hidden_dim, args.cheb_k,
+            args.embed_dim, args.time_dim, self.num_layers
         )
-
         self.encoder.use_hypergraph = getattr(args, 'use_hypergraph', True)
         self.encoder.use_interactive = getattr(args, 'use_interactive', True)
         self.encoder.num_hyper_edges = getattr(args, 'num_hyper_edges', 32)
 
         self.decoder = PDG2Seq_Dncoder(
-            args.num_nodes, args.input_dim, args.rnn_units, args.cheb_k,
-            args.embed_dim, args.time_dim, args.num_layers
+            self.num_node, self.output_dim, self.hidden_dim, args.cheb_k,
+            args.embed_dim, args.time_dim, self.num_layers
         )
         self.decoder.use_hypergraph = getattr(args, 'use_hypergraph', True)
         self.decoder.use_interactive = getattr(args, 'use_interactive', True)
@@ -223,7 +211,6 @@ class PDG2Seq(nn.Module):
             output_main = output_main.reshape(B, N, T, 2).permute(0, 2, 1, 3)
             output = torch.cat([output_main, output[..., self.output_dim:]], dim=-1) if output.shape[-1] > 2 else output_main
         return output
-
 
     def _compute_sampling_threshold(self, batches_seen):
         x = self.cl_decay_steps / (
