@@ -22,27 +22,35 @@ class PDG2Seq_Encoder(nn.Module):
                                                  use_hypergraph=getattr(self, 'use_hypergraph', True),
                                                  use_interactive=getattr(self, 'use_interactive', True),
                                                  num_hyper_edges=getattr(self, 'num_hyper_edges', 32)))
-        
+
     def forward(self, x, init_state, node_embeddings):
+        #shape of x: (B, T, N, D)
+        #shape of init_state: (num_layers, B, N, hidden_dim)
         assert x.shape[2] == self.node_num and x.shape[3] == self.input_dim
-        seq_length = x.shape[1]
+        seq_length = x.shape[1]     #x=[batch,steps,nodes,input_dim]
         current_inputs = x
         output_hidden = []
         for i in range(self.num_layers):
-            state = init_state[i]
+            state = init_state[i]   #state=[batch,steps,nodes,input_dim]
             inner_states = []
-            for t in range(seq_length):
-                state = self.PDG2Seq_cells[i](current_inputs[:, t, :, :], state, [node_embeddings[0][:, t, :], node_embeddings[1][:, t, :], node_embeddings[2]])
-                inner_states.append(state)
-            output_hidden.append(state)
+            for t in range(seq_length):   #如果有两层GRU，则第二层的GGRU的输入是前一层的隐藏状态
+                state = self.PDG2Seq_cells[i](current_inputs[:, t, :, :], state, [node_embeddings[0][:, t, :], node_embeddings[1][:, t, :], node_embeddings[2]])#state=[batch,steps,nodes,input_dim]
+                # state = self.dcrnn_cells[i](current_inputs[:, t, :, :], state,[node_embeddings[0], node_embeddings[1]])
+                inner_states.append(state)   #一个list，里面是每一步的GRU的hidden状态
+            output_hidden.append(state)  #每层最后一个GRU单元的hidden状态
             current_inputs = torch.stack(inner_states, dim=1)
+            #拼接成完整的上一层GRU的hidden状态，作为下一层GRRU的输入[batch,steps,nodes,hiddensize]
+        #current_inputs: the outputs of last layer: (B, T, N, hidden_dim)
+        #output_hidden: the last state for each layer: (num_layers, B, N, hidden_dim)
+        #last_state: (B, N, hidden_dim)
         return current_inputs, output_hidden
 
     def init_hidden(self, batch_size):
         init_states = []
         for i in range(self.num_layers):
             init_states.append(self.PDG2Seq_cells[i].init_hidden_state(batch_size))
-        return torch.stack(init_states, dim=0)
+        return torch.stack(init_states, dim=0)      #(num_layers, B, N, hidden_dim)
+
 
 class PDG2Seq_Dncoder(nn.Module):
     def __init__(self, node_num, dim_in, dim_out, cheb_k, embed_dim, time_dim, num_layers=1):
@@ -63,6 +71,8 @@ class PDG2Seq_Dncoder(nn.Module):
                                                  num_hyper_edges=getattr(self, 'num_hyper_edges', 32)))
 
     def forward(self, xt, init_state, node_embeddings):
+        # xt: (B, N, D)
+        # init_state: (num_layers, B, N, hidden_dim)
         assert xt.shape[1] == self.node_num and xt.shape[2] == self.input_dim
         current_inputs = xt
         output_hidden = []
@@ -91,7 +101,8 @@ class PDG2Seq(nn.Module):
         self.D_i_W_emb2 = nn.Parameter(torch.empty(7, args.time_dim))
 
         self.use_revin = getattr(args, 'use_revin', True)
-        if self.use_revin:
+        if self.use_revin == True:
+            print("use revin")
             self.revin = RevIN(
                 num_features=self.input_dim,
                 affine=getattr(args, 'revin_affine', True),
@@ -105,7 +116,7 @@ class PDG2Seq(nn.Module):
         # self.patch_embed_dim = getattr(args, 'patch_embed_dim', 16)
         # self.patch_embedding = PatchEmbedding(self.patch_len, self.patch_stride, self.input_dim, self.patch_embed_dim)
 
-        if self.use_patch:
+        if self.use_patch == True:
             self.encoder_input_dim = self.patch_len * self.input_dim
         else:
             self.encoder_input_dim = self.input_dim
@@ -133,7 +144,7 @@ class PDG2Seq(nn.Module):
         # source: B, T, N, D
         # traget: B, T, N, D
 
-        if self.revin:
+        if self.revin == True:
             B, T, N, D = source.shape
             source_main = source[..., :self.input_dim]
             source_main = source_main.permute(0, 2, 1, 3).reshape(B * N, T, self.input_dim)
@@ -141,7 +152,7 @@ class PDG2Seq(nn.Module):
             source_main = source_main.reshape(B, N, T, self.input_dim).permute(0, 2, 1, 3)
             source = torch.cat([source_main, source[..., self.input_dim:]], dim=-1)
 
-        if self.use_patch:
+        if self.use_patch == True:
             # Chia patch cho 2 đặc trưng đầu, giảm chiều dài chuỗi
             B, T, N, D = source.shape
             x_patch = source[..., :self.input_dim]  # (B, T, N, 2)
@@ -152,7 +163,7 @@ class PDG2Seq(nn.Module):
             patches = patches.permute(0, 2, 1, 3)  # (B, num_patches, N, patch_len*2)
             source_for_encoder = patches
         else:
-            source_for_encoder = source  # (B, T, N, 2)
+            source_for_encoder = source[..., :self.input_dim]  # (B, T, N, 2)
 
         # Node embedding và các bước khác giữ nguyên
         t_i_d_data1 = source[..., 0, -2]
@@ -204,7 +215,7 @@ class PDG2Seq(nn.Module):
                     go = traget[:, t, :, :self.input_dim]
         output = torch.stack(out, dim=1)
 
-        if self.revin:
+        if self.revin == True:
             B, T, N, D = output.shape
             output_main = output[..., :self.input_dim]
             output_main = output_main.permute(0, 2, 1, 3).reshape(B * N, T, 2)
