@@ -111,16 +111,17 @@ class PDG2Seq(nn.Module):
             self.encoder_input_dim = self.input_dim
 
         self.encoder = PDG2Seq_Encoder(
-            self.num_node, self.encoder_input_dim, self.hidden_dim, args.cheb_k,
-            args.embed_dim, args.time_dim, self.num_layers
+            args.num_nodes, args.input_dim, args.rnn_units, args.cheb_k,
+            args.embed_dim, args.time_dim, args.num_layers
         )
+
         self.encoder.use_hypergraph = getattr(args, 'use_hypergraph', True)
         self.encoder.use_interactive = getattr(args, 'use_interactive', True)
         self.encoder.num_hyper_edges = getattr(args, 'num_hyper_edges', 32)
 
         self.decoder = PDG2Seq_Dncoder(
-            self.num_node, self.output_dim, self.hidden_dim, args.cheb_k,
-            args.embed_dim, args.time_dim, self.num_layers
+            args.num_nodes, args.input_dim, args.rnn_units, args.cheb_k,
+            args.embed_dim, args.time_dim, args.num_layers
         )
         self.decoder.use_hypergraph = getattr(args, 'use_hypergraph', True)
         self.decoder.use_interactive = getattr(args, 'use_interactive', True)
