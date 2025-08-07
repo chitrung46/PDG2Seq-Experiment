@@ -90,12 +90,12 @@ class PDG2Seq(nn.Module):
         self.T_i_D_emb2 = nn.Parameter(torch.empty(288, args.time_dim))
         self.D_i_W_emb2 = nn.Parameter(torch.empty(7, args.time_dim))
 
-        self.use_revin = getattr(args, 'use_revin', True)
+        self.use_revin = getattr(args, 'revin', True)
         if self.use_revin == True:
             self.revin = RevIN(
                 num_features=self.input_dim,
-                affine=getattr(args, 'revin_affine', True),
-                subtract_last=getattr(args, 'revin_subtract_last', False)
+                affine=getattr(args, 'affine', True),
+                subtract_last=getattr(args, 'subtract_last', False)
             )
 
         self.use_patch = getattr(args, 'use_patch', False)
