@@ -224,6 +224,7 @@ class PDG2Seq(nn.Module):
             output = torch.cat([output_main, output[..., self.output_dim:]], dim=-1) if output.shape[-1] > 2 else output_main
         return output
 
+
     def _compute_sampling_threshold(self, batches_seen):
         x = self.cl_decay_steps / (
             self.cl_decay_steps + np.exp(batches_seen / self.cl_decay_steps))
