@@ -137,8 +137,6 @@ class PDG2Seq(nn.Module):
             source_main = source[..., :self.input_dim]
             source_main = source_main.permute(0, 2, 1, 3).reshape(B * N, T, self.input_dim)
             source_main = self.revin(source_main, 'norm')
-            if torch.isnan(source_main).any() or torch.isinf(source_main).any():
-                print("Có NaN hoặc Inf trong source_main sau RevIN!")
             source_main = source_main.reshape(B, N, T, self.input_dim).permute(0, 2, 1, 3)
             source = torch.cat([source_main, source[..., self.input_dim:]], dim=-1)
 
@@ -153,7 +151,7 @@ class PDG2Seq(nn.Module):
             patches = patches.permute(0, 2, 1, 3)  # (B, num_patches, N, patch_len*2)
             source_for_encoder = patches
         else:
-            source_for_encoder = source[..., :self.input_dim]  # (B, T, N, 2)
+            source_for_encoder = source  # (B, T, N, 2)
 
         # Node embedding và các bước khác giữ nguyên
         t_i_d_data1 = source[..., 0, -2]
