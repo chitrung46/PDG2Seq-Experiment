@@ -46,7 +46,7 @@ args.add_argument('--device', default='cuda:0', type=str, help='indices of GPUs'
 args.add_argument('--debug', default='False', type=eval)
 args.add_argument('--model', default='PDG2Seq', type=str)
 args.add_argument('--cuda', default=True, type=bool)
-args.add_argument('--revin', default=True, type=lambda x: x.lower()=='true')
+args.add_argument('--use_revin', default=True, type=lambda x: x.lower()=='true')
 args.add_argument('--affine', default=True, type=lambda x: x.lower()=='true')
 args.add_argument('--subtract_last', default=False, type=lambda x: x.lower()=='true')
 args.add_argument('--use_patch', default=True, type=lambda x: x.lower()=='true')

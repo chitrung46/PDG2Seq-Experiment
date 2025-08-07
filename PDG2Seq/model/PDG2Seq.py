@@ -90,7 +90,7 @@ class PDG2Seq(nn.Module):
         self.T_i_D_emb2 = nn.Parameter(torch.empty(288, args.time_dim))
         self.D_i_W_emb2 = nn.Parameter(torch.empty(7, args.time_dim))
 
-        self.use_revin = getattr(args, 'revin', True)
+        self.use_revin = getattr(args, 'use_revin', True)
         if self.use_revin == True:
             self.revin = RevIN(
                 num_features=self.input_dim,
@@ -132,7 +132,7 @@ class PDG2Seq(nn.Module):
         # source: B, T, N, D
         # traget: B, T, N, D
 
-        if self.revin == True:
+        if self.use_revin == True:
             B, T, N, D = source.shape
             source_main = source[..., :self.input_dim]
             source_main = source_main.permute(0, 2, 1, 3).reshape(B * N, T, self.input_dim)
@@ -203,7 +203,7 @@ class PDG2Seq(nn.Module):
                     go = traget[:, t, :, :self.input_dim]
         output = torch.stack(out, dim=1)
 
-        if self.revin == True:
+        if self.use_revin == True:
             B, T, N, D = output.shape
             output_main = output[..., :self.input_dim]
             output_main = output_main.permute(0, 2, 1, 3).reshape(B * N, T, 2)
