@@ -5,7 +5,6 @@ from model.hypergraph import HypergraphLearning
 from model.interactive import InteractiveGCN
 from collections import OrderedDict
 import torch.nn.functional as F
-
 class FC(nn.Module):
     def __init__(self, dim_in, dim_out):
         super(FC, self).__init__()
