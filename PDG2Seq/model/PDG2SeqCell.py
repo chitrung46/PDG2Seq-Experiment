@@ -30,11 +30,10 @@ class PDG2SeqCell(nn.Module):  #这个模块只进行GRU内部的更新，所以
         super(PDG2SeqCell, self).__init__()
         self.node_num = node_num
         self.hidden_dim = dim_out
-        self.input_dim = dim_in
-        self.gate = PDG2Seq_GCN(self.input_dim + self.hidden_dim, 2 * dim_out, cheb_k, embed_dim, time_dim)
-        self.update = PDG2Seq_GCN(self.input_dim + self.hidden_dim, dim_out, cheb_k, embed_dim, time_dim)
-        self.fc1 = FC(self.input_dim + self.hidden_dim, time_dim)
-        self.fc2 = FC(self.input_dim + self.hidden_dim, time_dim)
+        self.gate = PDG2Seq_GCN(dim_in + self.hidden_dim, 2 * dim_out, cheb_k, embed_dim, time_dim)
+        self.update = PDG2Seq_GCN(dim_in + self.hidden_dim, dim_out, cheb_k, embed_dim, time_dim)
+        self.fc1 = FC(dim_in + self.hidden_dim, time_dim)
+        self.fc2 = FC(dim_in + self.hidden_dim, time_dim)
         self.use_hypergraph = use_hypergraph
         self.use_interactive = use_interactive
         if use_hypergraph:
