@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from model.PDG2SeqCell import PDG2SeqCell
 import numpy as np
-from model.multiscale_hyper import MultiScaleHyperTemporalHead
+from model.multiscale_hyper import MultiScaleHyperTemporalHead, MultiScaleHyperRefiner
 class PDG2Seq_Encoder(nn.Module):
     def __init__(self, node_num, dim_in, dim_out, cheb_k, embed_dim, time_dim, num_layers=1):
         super(PDG2Seq_Encoder, self).__init__()
@@ -10,16 +10,23 @@ class PDG2Seq_Encoder(nn.Module):
         self.node_num = node_num
         self.input_dim = dim_in
         self.num_layers = num_layers
+        # Multiscale hypergraph core (optional, configured by parent)
+        self.use_ms_core = False
+        self.ms_refiner = None
         self.PDG2Seq_cells = nn.ModuleList()
-        self.PDG2Seq_cells.append(PDG2SeqCell(node_num, dim_in, dim_out, cheb_k, embed_dim, time_dim,
-                                             use_hypergraph=getattr(self, 'use_hypergraph', True),
-                                             use_interactive=getattr(self, 'use_interactive', True),
-                                             num_hyper_edges=getattr(self, 'num_hyper_edges', 32)))
+        self.PDG2Seq_cells.append(PDG2SeqCell(
+            node_num, dim_in, dim_out, cheb_k, embed_dim, time_dim,
+            use_hypergraph=getattr(self, 'use_hypergraph', True),
+            use_interactive=getattr(self, 'use_interactive', True),
+            num_hyper_edges=getattr(self, 'num_hyper_edges', 32)
+        ))
         for _ in range(1, num_layers):
-            self.PDG2Seq_cells.append(PDG2SeqCell(node_num, dim_out, dim_out, cheb_k, embed_dim, time_dim,
-                                                 use_hypergraph=getattr(self, 'use_hypergraph', True),
-                                                 use_interactive=getattr(self, 'use_interactive', True),
-                                                 num_hyper_edges=getattr(self, 'num_hyper_edges', 32)))
+            self.PDG2Seq_cells.append(PDG2SeqCell(
+                node_num, dim_out, dim_out, cheb_k, embed_dim, time_dim,
+                use_hypergraph=getattr(self, 'use_hypergraph', True),
+                use_interactive=getattr(self, 'use_interactive', True),
+                num_hyper_edges=getattr(self, 'num_hyper_edges', 32)
+            ))
 
     def forward(self, x, init_state, node_embeddings):
         #shape of x: (B, T, N, D)
@@ -28,12 +35,35 @@ class PDG2Seq_Encoder(nn.Module):
         seq_length = x.shape[1]     #x=[batch,steps,nodes,input_dim]
         current_inputs = x
         output_hidden = []
+        # reset aux loss accumulator
+        self.ms_aux_loss_accum = torch.tensor(0.0, device=x.device)
         for i in range(self.num_layers):
             state = init_state[i]   #state=[batch,steps,nodes,input_dim]
             inner_states = []
             for t in range(seq_length):   #如果有两层GRU，则第二层的GGRU的输入是前一层的隐藏状态
                 state = self.PDG2Seq_cells[i](current_inputs[:, t, :, :], state, [node_embeddings[0][:, t, :], node_embeddings[1][:, t, :], node_embeddings[2]])#state=[batch,steps,nodes,input_dim]
                 # state = self.dcrnn_cells[i](current_inputs[:, t, :, :], state,[node_embeddings[0], node_embeddings[1]])
+                # Integrate multiscale hypergraph directly if enabled
+                if self.use_ms_core and (self.ms_refiner is not None):
+                    stride = getattr(self, 'ms_stride', 1)
+                    if stride < 1:
+                        stride = 1
+                    # Only refine every ms_stride steps for speed
+                    do_refine = (t % stride == 0) or (t == seq_length - 1)
+                else:
+                    do_refine = False
+                if do_refine:
+                    L = self.ms_refiner.seq_len
+                    start = max(0, t - L + 1)
+                    ctx = current_inputs[:, start:t+1, :, :]
+                    if ctx.size(1) < L:
+                        pad_len = L - ctx.size(1)
+                        pad = ctx[:, :1, :, :].expand(-1, pad_len, -1, -1)
+                        ctx = torch.cat([pad, ctx], dim=1)
+                    delta_h, aux = self.ms_refiner(ctx)
+                    state = state + delta_h
+                    # accumulate aux loss
+                    self.ms_aux_loss_accum = self.ms_aux_loss_accum + aux
                 inner_states.append(state)   #一个list，里面是每一步的GRU的hidden状态
             output_hidden.append(state)  #每层最后一个GRU单元的hidden状态
             current_inputs = torch.stack(inner_states, dim=1)
@@ -118,48 +148,51 @@ class PDG2Seq(nn.Module):
         self.proj = nn.Sequential(nn.Linear(self.hidden_dim, self.output_dim, bias=True))
         self.end_conv = nn.Conv2d(1, args.horizon * self.output_dim, kernel_size=(1, self.hidden_dim), bias=True)
 
-        # Optional multi-scale adaptive hypergraph temporal head
-        self.use_ms_hyper = getattr(args, 'use_ms_hyper', False)
-        if self.use_ms_hyper:
-            # New args (with defaults if missing):
-            # - use_ms_hyper: bool to enable/disable this head
-            # - window_size: List[int], e.g., [4,4] defining temporal pooling per scale
-            # - hyper_num:   List[int] number of hyperedges per scale, e.g., [32,16]
-            # - k:           int top-k connections per node in adaptive hypergraph
-            # - seq_len:     encoder input length (for temporal pooling sizes)
-            # These are read from args via getattr to keep backward compatibility.
-            # The head adds a residual [B,H,N,output_dim] and exposes aux loss in self.ms_aux_loss.
-            window_size = getattr(args, 'window_size', [4, 4])
+        # Direct multiscale hypergraph integration (core)
+        self.use_ms_hyper_core = getattr(args, 'use_ms_hyper_core', True)
+        if self.use_ms_hyper_core:
+            window_size = getattr(args, 'window_size', [4, 3])
             hyper_num = getattr(args, 'hyper_num', [32, 16])
             k = getattr(args, 'k', 10)
-            self.ms_head = MultiScaleHyperTemporalHead(
-                seq_len=getattr(args, 'seq_len', 12),
-                horizon=self.horizon,
+            seq_len = getattr(args, 'seq_len', getattr(args, 'lag', 12))
+            # performance-related knobs
+            rebuild_every = getattr(args, 'ms_rebuild_every', 0)
+            enable_aux_loss = getattr(args, 'ms_enable_aux_loss', False)
+            aux_max_edges = getattr(args, 'ms_aux_max_edges', 256)
+            enable_inter_attn = getattr(args, 'ms_enable_inter_attn', True)
+            self.ms_stride = getattr(args, 'ms_stride', 1)
+            ms_refiner = MultiScaleHyperRefiner(
+                seq_len=seq_len,
                 input_dim=self.input_dim,
-                output_dim=self.output_dim,
+                hidden_dim=self.hidden_dim,
                 window_size=window_size,
                 hyper_num=hyper_num,
                 k=k,
                 alpha=3.0,
+                rebuild_every=rebuild_every,
+                enable_aux_loss=enable_aux_loss,
+                aux_max_edges=aux_max_edges,
+                enable_inter_attn=enable_inter_attn,
             )
+            # Attach to encoder
+            self.encoder.use_ms_core = True
+            self.encoder.ms_refiner = ms_refiner
+            self.encoder.ms_stride = self.ms_stride
 
     def forward(self, source, traget=None, batches_seen=None):
-        #source: B, T_1, N, D
-        #target: B, T_2, N, D
+        # source: B, T_1, N, D
+        # target: B, T_2, N, D
 
-
-        t_i_d_data1 = source[..., 0,-2]
-        t_i_d_data2 = traget[..., 0,-2]
-        # T_i_D_emb = self.T_i_D_emb[(t_i_d_data[:, -1, :] * 288).type(torch.LongTensor)]
+        t_i_d_data1 = source[..., 0, -2]
+        t_i_d_data2 = traget[..., 0, -2]
         T_i_D_emb1_en = self.T_i_D_emb1[(t_i_d_data1 * 288).type(torch.LongTensor)]
         T_i_D_emb2_en = self.T_i_D_emb2[(t_i_d_data1 * 288).type(torch.LongTensor)]
 
         T_i_D_emb1_de = self.T_i_D_emb1[(t_i_d_data2 * 288).type(torch.LongTensor)]
         T_i_D_emb2_de = self.T_i_D_emb2[(t_i_d_data2 * 288).type(torch.LongTensor)]
         if self.use_W:
-            d_i_w_data1 = source[..., 0,-1]
-            d_i_w_data2 = traget[..., 0,-1]
-            # D_i_W_emb = self.D_i_W_emb[(d_i_w_data[:, -1, :]).type(torch.LongTensor)]
+            d_i_w_data1 = source[..., 0, -1]
+            d_i_w_data2 = traget[..., 0, -1]
             D_i_W_emb1_en = self.D_i_W_emb1[(d_i_w_data1).type(torch.LongTensor)]
             D_i_W_emb2_en = self.D_i_W_emb2[(d_i_w_data1).type(torch.LongTensor)]
 
@@ -178,12 +211,11 @@ class PDG2Seq(nn.Module):
             node_embedding_de1 = T_i_D_emb1_de
             node_embedding_de2 = T_i_D_emb2_de
 
-
-        en_node_embeddings=[node_embedding_en1, node_embedding_en2, self.node_embeddings1]
+        en_node_embeddings = [node_embedding_en1, node_embedding_en2, self.node_embeddings1]
 
         source = source[..., :self.input_dim]
 
-        init_state = self.encoder.init_hidden(source.shape[0]).to(source.device)  # [2,64,307,64] 前面是2是因为有两层GRU
+        init_state = self.encoder.init_hidden(source.shape[0]).to(source.device)
         state, _ = self.encoder(source, init_state, en_node_embeddings)  # B, T, N, hidden
         state = state[:, -1:, :, :].squeeze(1)
 
@@ -192,23 +224,19 @@ class PDG2Seq(nn.Module):
         go = torch.zeros((source.shape[0], self.num_node, self.output_dim), device=source.device)
         out = []
         for t in range(self.horizon):
-            state, ht_list = self.decoder(go, ht_list, [node_embedding_de1[:, t, :], node_embedding_de2[:, t, :], self.node_embeddings1])
+            state, ht_list = self.decoder(
+                go, ht_list, [node_embedding_de1[:, t, :], node_embedding_de2[:, t, :], self.node_embeddings1]
+            )
             go = self.proj(state)
             out.append(go)
-            if self.training:     #这里的课程学习用了给予一定概率用真实值代替预测值来学习的教师-学生学习法（名字忘了，大概跟着有关）
+            if self.training:
                 c = np.random.uniform(0, 1)
-                if c < self._compute_sampling_threshold(batches_seen):  #如果满足条件，则用真实值代替预测值训练
+                if c < self._compute_sampling_threshold(batches_seen):
                     go = traget[:, t, :, :self.input_dim]
-        output = torch.stack(out, dim=1)  # [B, H, N, output_dim]
 
-        # Fuse optional multi-scale hypergraph temporal head as residual
-        if getattr(self, 'use_ms_hyper', False):
-            ms_out, ms_loss = self.ms_head(source)
-            output = output + ms_out  # residual fusion
-            # Expose aux loss for training if caller wants it via attribute
-            self.ms_aux_loss = ms_loss
-        else:
-            self.ms_aux_loss = None
+        output = torch.stack(out, dim=1)  # [B, H, N, output_dim]
+        # Expose encoder's accumulated aux loss (if any) for training
+        self.ms_aux_loss = getattr(self.encoder, 'ms_aux_loss_accum', None)
 
         return output
 

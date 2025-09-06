@@ -43,6 +43,9 @@ class MultiScaleTemporalPooling(nn.Module):
             if k <= 1:
                 outs.append(cur)
                 continue
+            # Stop if pooling would produce length < 1
+            if cur.size(1) // k < 1:
+                break
             # Pool along time axis
             cur = F.avg_pool1d(cur.transpose(1, 2), kernel_size=k, stride=k, ceil_mode=False).transpose(1, 2)
             outs.append(cur)
@@ -146,11 +149,15 @@ class HypergraphConv(MessagePassing):
                  concat: bool = True,
                  negative_slope: float = 0.2,
                  dropout: float = 0.1,
-                 bias: bool = False):
+                 bias: bool = False,
+                 enable_aux_loss: bool = True,
+                 aux_max_edges: int = 256):
         super().__init__(aggr='add')
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.use_attention = use_attention
+        self.enable_aux_loss = enable_aux_loss
+        self.aux_max_edges = aux_max_edges
 
         if self.use_attention:
             self.heads = heads
@@ -192,9 +199,15 @@ class HypergraphConv(MessagePassing):
         return out
 
     def message(self, x_j: torch.Tensor, edge_index_i: torch.Tensor, norm: torch.Tensor, alpha: torch.Tensor):
-        out = norm[edge_index_i].view(-1, 1, 1) * x_j
+        out = norm[edge_index_i].view(-1, 1, 1) * x_j  # [E, B, C]
         if alpha is not None:
-            out = alpha.unsqueeze(-1) * out
+            a = alpha
+            # Reduce alpha to shape [E] (average over extra dims if present)
+            while a.dim() > 1:
+                a = a.mean(dim=-1)
+            # Expand to [E, B] to match x_j's batch dimension
+            a = a.view(-1, 1).expand(-1, x_j.size(1))
+            out = a.unsqueeze(-1) * out
         return out
 
     def forward(self, x: torch.Tensor, hyperedge_index: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -228,26 +241,37 @@ class HypergraphConv(MessagePassing):
         mapped_edge_idx = torch.tensor([remap[int(e.item())] for e in hyperedge_index[1]], device=x.device, dtype=torch.long)
         x_j = torch.index_select(result_list, dim=0, index=mapped_edge_idx)  # [E, B, C]
 
-        # Hyperedge consistency loss (pairwise)
-        loss_hyper = 0.0
-        keys = list(edge_sums.keys())
-        for k in range(len(keys)):
-            for m in range(len(keys)):
-                ek = edge_sums[keys[k]]
-                em = edge_sums[keys[m]]
-                inner_product = torch.sum(ek * em, dim=1, keepdim=True)
-                norm_q_i = torch.norm(ek, dim=1, keepdim=True) + 1e-6
-                norm_q_j = torch.norm(em, dim=1, keepdim=True) + 1e-6
-                alpha = inner_product / (norm_q_i * norm_q_j)
-                distan = torch.norm(ek - em, dim=1, keepdim=True)
-                loss_item = alpha * distan + (1 - alpha) * torch.clamp(torch.tensor(4.2, device=x.device, dtype=x.dtype) - distan, min=0.0)
-                loss_hyper += torch.abs(torch.mean(loss_item))
+        # Hyperedge consistency loss (pairwise) - make optional and sampled
+        if self.enable_aux_loss:
+            loss_hyper = 0.0
+            keys = list(edge_sums.keys())
+            # Sample up to aux_max_edges to limit O(E^2)
+            if len(keys) > self.aux_max_edges:
+                keys = keys[: self.aux_max_edges]
+            for k in range(len(keys)):
+                for m in range(len(keys)):
+                    ek = edge_sums[keys[k]]
+                    em = edge_sums[keys[m]]
+                    inner_product = torch.sum(ek * em, dim=1, keepdim=True)
+                    norm_q_i = torch.norm(ek, dim=1, keepdim=True) + 1e-6
+                    norm_q_j = torch.norm(em, dim=1, keepdim=True) + 1e-6
+                    alpha = inner_product / (norm_q_i * norm_q_j)
+                    distan = torch.norm(ek - em, dim=1, keepdim=True)
+                    loss_item = alpha * distan + (1 - alpha) * torch.clamp(torch.tensor(4.2, device=x.device, dtype=x.dtype) - distan, min=0.0)
+                    loss_hyper += torch.abs(torch.mean(loss_item))
 
-        loss_hyper = loss_hyper / ((len(edge_sums) + 1) ** 2)
+            loss_hyper = loss_hyper / ((len(edge_sums) + 1) ** 2)
+        else:
+            loss_hyper = torch.tensor(0.0, device=x.device, dtype=x.dtype)
 
         # Attention coefficients
-        alpha = (torch.cat([x_i, x_j], dim=-1) * self.att).sum(dim=-1)  # [E, B, heads]
+        alpha = (torch.cat([x_i, x_j], dim=-1) * self.att).sum(dim=-1)  # [E, B, heads] when heads=1 -> [E, B, 1] or [E, B]
         alpha = F.leaky_relu(alpha, 0.2)
+        # Collapse batch dimension to get stable per-edge weights and avoid broadcasting mismatches
+        if alpha.dim() == 3:
+            alpha = alpha.mean(dim=1, keepdim=True)  # [E, 1, heads]
+        elif alpha.dim() == 2:
+            alpha = alpha.mean(dim=1, keepdim=True)  # [E, 1]
         alpha = softmax(alpha, hyperedge_index[0], num_nodes=x1.size(0))
         alpha = F.dropout(alpha, p=0.1, training=self.training)
 
@@ -311,7 +335,8 @@ class MultiScaleHyperTemporalHead(nn.Module):
         self.window_size = window_size
 
         self.all_size = get_mask(seq_len, window_size)
-        self.total_nodes = sum(self.all_size)
+        # Only count scales that will actually use hypergraph conv
+        self.total_nodes = sum(self.all_size[:len(hyper_num)])
 
         self.pool = MultiScaleTemporalPooling(window_size)
         self.builder = MultiAdaptiveHypergraph(seq_len, window_size, d_model=input_dim, hyper_num=hyper_num, k=k, alpha=alpha)
@@ -398,4 +423,135 @@ class MultiScaleHyperTemporalHead(nn.Module):
 
         if result_conloss is None:
             result_conloss = torch.tensor(0.0, device=device, dtype=x.dtype)
+        return y, result_conloss
+
+
+class MultiScaleHyperRefiner(nn.Module):
+    """Refines current hidden state using a fixed-length temporal context via
+    multi-scale adaptive hypergraph reasoning. Designed to be used inside a
+    recurrent cell at each time step.
+
+    Inputs:
+      - seq_len: fixed context length (must match provided context length)
+      - input_dim: feature channels per time step (e.g., x_dim)
+      - hidden_dim: target hidden dimension to refine
+      - window_size, hyper_num, k, alpha: hypergraph configuration
+
+    Forward(context):
+      context shape [B, seq_len, N, input_dim]
+      returns (delta_h [B, N, hidden_dim], aux_loss)
+    """
+
+    def __init__(self,
+                 seq_len: int,
+                 input_dim: int,
+                 hidden_dim: int,
+                 window_size: List[int],
+                 hyper_num: List[int],
+                 k: int = 10,
+                 alpha: float = 3.0,
+                 rebuild_every: int = 0,
+                 enable_aux_loss: bool = False,
+                 aux_max_edges: int = 256,
+                 enable_inter_attn: bool = True):
+        super().__init__()
+        self.seq_len = seq_len
+        self.input_dim = input_dim
+        self.hidden_dim = hidden_dim
+        self.window_size = window_size
+        self.rebuild_every = rebuild_every
+        self.enable_inter_attn = enable_inter_attn
+        self._cached_hyper = {}
+        self._call_count = 0
+
+        self.all_size = get_mask(seq_len, window_size)
+        self.total_nodes = sum(self.all_size[:len(hyper_num)])
+
+        self.pool = MultiScaleTemporalPooling(window_size)
+        self.builder = MultiAdaptiveHypergraph(seq_len, window_size, d_model=input_dim, hyper_num=hyper_num, k=k, alpha=alpha)
+        self.hyconv = nn.ModuleList([
+            HypergraphConv(input_dim, input_dim, enable_aux_loss=enable_aux_loss, aux_max_edges=aux_max_edges)
+            for _ in range(len(hyper_num))
+        ])
+
+        # Projections
+        self.out_tran = nn.Linear(self.total_nodes, 1)  # project to the current step
+        self.refine = nn.Linear(1, 1)
+        self.channel_tran = nn.Linear(input_dim, hidden_dim)
+        self.attn = SelfAttentionLayer(input_dim)
+
+    def forward(self, context: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        # context: [B, L, N, D], L must equal self.seq_len
+        B, L, N, D = context.shape
+        device = context.device
+
+        # Node-agnostic temporal series
+        xs = context.mean(dim=2)  # [B, L, D]
+
+        # Normalize across time
+        mean_enc = xs.mean(1, keepdim=True).detach()
+        std_enc = torch.sqrt(torch.var(xs, dim=1, keepdim=True, unbiased=False) + 1e-5).detach()
+        xs_n = (xs - mean_enc) / std_enc
+
+        # Scales
+        seq_list = self.pool(xs_n)
+
+        # Hypergraphs with caching/rebuild cadence
+        cache_key = str(device)
+        need_rebuild = (cache_key not in self._cached_hyper)
+        if not need_rebuild and self.rebuild_every and (self._call_count % self.rebuild_every == 0):
+            need_rebuild = True
+        if need_rebuild:
+            hyper_list = self.builder.build(device)
+            self._cached_hyper[cache_key] = hyper_list
+        else:
+            hyper_list = self._cached_hyper[cache_key]
+        self._call_count += 1
+
+        sum_hyper_list = []
+        result_tensor = None
+        result_conloss = None
+
+        for i in range(len(hyper_list)):
+            he = hyper_list[i].to(device)
+            node_value = seq_list[i]  # [B, L_i, D]
+
+            # Hyperedge-wise sums
+            edge_sums = {}
+            for edge_id, node_id in zip(he[1], he[0]):
+                e = edge_id.item()
+                n = node_id.item()
+                if e not in edge_sums:
+                    edge_sums[e] = node_value[:, n, :]
+                else:
+                    edge_sums[e] += node_value[:, n, :]
+            for _, sum_value in edge_sums.items():
+                sum_hyper_list.append(sum_value.unsqueeze(1))  # [B, 1, D]
+
+            out_i, conloss_i = self.hyconv[i](node_value, he)  # [B, L_i, D]
+            result_tensor = out_i if result_tensor is None else torch.cat([result_tensor, out_i], dim=1)
+            result_conloss = conloss_i if result_conloss is None else (result_conloss + conloss_i)
+
+        if self.enable_inter_attn and len(sum_hyper_list) > 0:
+            sum_hyper = torch.cat(sum_hyper_list, dim=1)  # [B, E_tot, D]
+            attn_out = self.attn(sum_hyper)  # [B, E_tot, D]
+            inter_out = F.adaptive_avg_pool1d(attn_out.transpose(1, 2), output_size=1).transpose(1, 2)  # [B, 1, D]
+        else:
+            inter_out = torch.zeros(B, 1, D, device=device, dtype=context.dtype)
+
+        if result_tensor is None:
+            intra_out = torch.zeros(B, 1, D, device=device, dtype=context.dtype)
+        else:
+            intra_out = self.out_tran(result_tensor.permute(0, 2, 1)).permute(0, 2, 1)  # [B, 1, D]
+
+        y = intra_out + inter_out
+        y = self.refine(y.transpose(1, 2)).transpose(1, 2)
+        y = y * std_enc + mean_enc  # [B, 1, D]
+
+        # Channel project to hidden and broadcast to nodes
+        y = self.channel_tran(y.squeeze(1))  # [B, hidden_dim]
+        y = y.unsqueeze(1).expand(-1, N, -1)  # [B, N, hidden_dim]
+
+        if result_conloss is None:
+            result_conloss = torch.tensor(0.0, device=device, dtype=context.dtype)
         return y, result_conloss
